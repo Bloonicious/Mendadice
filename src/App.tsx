@@ -25,7 +25,7 @@ const helpPages = [
 
 const connectionRetryDelayMs = 15000;
 const defaultAgent8Verse = "W3u3h5L";
-const walletAddressPattern = /^0x[a-fA-F0-9]{40}$/;
+const walletAddressPattern = /^0x[a-fA-F0-9]{40}/;
 
 const getConfiguredVerse = () => {
   const configuredVerse = import.meta.env.VITE_AGENT8_VERSE;
