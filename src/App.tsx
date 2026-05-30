@@ -23,8 +23,13 @@ const helpPages = [
   }
 ];
 
+const connectionRetryDelayMs = 15000;
+
 const gameServerConfig = import.meta.env.PROD
-  ? { verse: import.meta.env.VITE_AGENT8_VERSE || "Mendadice" }
+  ? {
+      verse: import.meta.env.VITE_AGENT8_VERSE || "Mendadice",
+      ...(import.meta.env.VITE_AGENT8_ACCOUNT ? { account: import.meta.env.VITE_AGENT8_ACCOUNT } : {})
+    }
   : undefined;
 
 export default function App() {
@@ -46,6 +51,25 @@ export default function App() {
   const [showChangelog, setShowChangelog] = useState(false);
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [botDifficulty, setBotDifficulty] = useState('Medium');
+  const [showConnectionHelp, setShowConnectionHelp] = useState(false);
+
+  useEffect(() => {
+    if (connected) {
+      setShowConnectionHelp(false);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setShowConnectionHelp(true);
+    }, connectionRetryDelayMs);
+
+    return () => clearTimeout(timeout);
+  }, [connected]);
+
+  const handleRetryConnection = () => {
+    setShowConnectionHelp(false);
+    window.location.reload();
+  };
 
   // Heartbeat for reconnect system
   useEffect(() => {
@@ -176,7 +200,32 @@ export default function App() {
   }, [roomState?.status]);
 
   if (!connected) {
-    return <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center">Connecting to server...</div>;
+    return (
+      <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-6">
+        <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-w-md w-full p-8 text-center">
+          <div className="mx-auto mb-5 w-14 h-14 rounded-full bg-amber-500/10 border border-amber-500/40 flex items-center justify-center">
+            {showConnectionHelp ? (
+              <AlertTriangle className="text-amber-400" size={28} />
+            ) : (
+              <Clock className="text-amber-400 animate-pulse" size={28} />
+            )}
+          </div>
+          <h1 className="text-2xl font-black tracking-widest mb-3">
+            {showConnectionHelp ? "SERVER STILL CONNECTING" : "CONNECTING TO SERVER..."}
+          </h1>
+          <p className="text-slate-300 leading-relaxed mb-6">
+            {showConnectionHelp
+              ? "Verse8 is taking longer than expected to respond. This can happen while the game server is waking up or if the creator account is not ready yet."
+              : "Connecting to the Mendadice Verse8 game server."}
+          </p>
+          {showConnectionHelp && (
+            <button onClick={handleRetryConnection} className="bg-amber-600 hover:bg-amber-500 text-white font-black tracking-widest py-3 px-6 rounded-lg shadow-lg transition-transform hover:scale-105 active:scale-95">
+              RETRY CONNECTION
+            </button>
+          )}
+        </div>
+      </div>
+    );
   }
 
   if (joined && roomState?.roomId !== roomCode) {
