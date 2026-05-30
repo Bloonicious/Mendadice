@@ -71,9 +71,15 @@ export class Server {
     await $room.updateUserState($sender.account, { lastSeen: Date.now() });
   }
 
+  private sanitizeName(name: string): string {
+    return name.replace(/[<>&"'/\\]/g, '').trim().substring(0, 15);
+  }
+
   async setPlayerName(name: string) {
     if (!name) return;
-    await $room.updateUserState($sender.account, { name: name.substring(0, 15) });
+    const sanitized = this.sanitizeName(name);
+    if (!sanitized) return;
+    await $room.updateUserState($sender.account, { name: sanitized });
   }
 
   private async isOwner(account: string, state: any): Promise<boolean> {
@@ -92,7 +98,9 @@ export class Server {
     if (!(await this.isOwner($sender.account, state))) throw new Error("Only room owner can rename bots");
     const bot = await $room.getUserState(botId);
     if (!bot.isBot) throw new Error("Not a bot");
-    await $room.updateUserState(botId, { name: name.substring(0, 15) });
+    const sanitized = this.sanitizeName(name);
+    if (!sanitized) return;
+    await $room.updateUserState(botId, { name: sanitized });
   }
 
   async togglePrivacy() {
@@ -134,6 +142,7 @@ export class Server {
   async addBot(difficulty: string = 'Medium'): Promise<void> {
     const state = await $room.getRoomState();
     if (state.status !== 'LOBBY') throw new Error("Can only add bots in LOBBY");
+    if (!(await this.isOwner($sender.account, state))) throw new Error("Only room owner can add bots");
     
     const players = state.players || [];
     if (players.length >= this.MAX_PLAYERS) throw new Error("Room is full");
@@ -161,6 +170,7 @@ export class Server {
   async startGame(): Promise<void> {
     const state = await $room.getRoomState();
     if (state.status !== 'LOBBY') throw new Error("Already started");
+    if (!(await this.isOwner($sender.account, state))) throw new Error("Only room owner can start the game");
     const players = state.players || [];
     if (players.length < 2) throw new Error("Need at least 2 players");
 
@@ -213,11 +223,14 @@ export class Server {
     await this.addLog(`New round started. ${(await $room.getUserState(startPlayer)).name}'s turn.`);
   }
 
-  async placeBid(quantity: number, face: number, byBot?: string): Promise<void> {
+  async placeBid(quantity: number, face: number): Promise<void> {
     const state = await $room.getRoomState();
     if (state.status !== 'PLAYING') throw new Error("Not playing");
-    const actor = byBot || $sender.account;
+    const actor = $sender.account;
     if (state.currentTurn !== actor) throw new Error("Not your turn");
+
+    if (!Number.isInteger(face) || face < 1 || face > 6) throw new Error("Face must be between 1 and 6");
+    if (!Number.isInteger(quantity) || quantity < 1) throw new Error("Quantity must be at least 1");
 
     if (quantity > 30) throw new Error("Quantity cannot exceed 30");
 
@@ -247,10 +260,10 @@ export class Server {
     });
   }
 
-  async callLiar(byBot?: string): Promise<void> {
+  async callLiar(): Promise<void> {
     const state = await $room.getRoomState();
     if (state.status !== 'PLAYING') throw new Error("Not playing");
-    const actor = byBot || $sender.account;
+    const actor = $sender.account;
     if (state.currentTurn !== actor) throw new Error("Not your turn");
     
     const currentBid = state.currentBid;
@@ -336,12 +349,14 @@ export class Server {
   async nextRound(): Promise<void> {
     const state = await $room.getRoomState();
     if (state.status !== 'ROUND_OVER') throw new Error("Not round over");
+    if (!(state.players || []).includes($sender.account)) throw new Error("Not a player in this room");
     await this.startRound(state.activePlayers);
   }
 
   async restartGame(): Promise<void> {
     const state = await $room.getRoomState();
     if (state.status !== 'GAME_OVER') throw new Error("Game not over");
+    if (!(await this.isOwner($sender.account, state))) throw new Error("Only room owner can restart the game");
     
     // Reset all players
     for (const p of state.players) {
@@ -456,9 +471,9 @@ export class Server {
          await this.addLog(`${turnState.name} took too long! Auto-playing...`);
          try {
            if (state.currentBid) {
-             await this.callLiar(state.currentTurn);
+             await this.botCallLiar(state.currentTurn);
            } else {
-             await this.placeBid(1, 2, state.currentTurn);
+             await this.botPlaceBid(1, 2, state.currentTurn);
            }
          } catch (e) {
            console.error("Auto-play error", e);
@@ -470,7 +485,7 @@ export class Server {
       if (turnState.isBot && timeTaken > 2000) {
         // It's a bot's turn, give it a delay to feel real
         await $room.updateRoomState({ turnStartTime: Date.now() + 9999999 }); // Prevent double tick
-        this.executeBotTurn(state.currentTurn, state, turnState);
+        await this.executeBotTurn(state.currentTurn, state, turnState);
       }
     }
   }
@@ -493,12 +508,10 @@ export class Server {
         let maxCount = 0;
         
         if (difficulty === 'Easy') {
-          // Easy picks random face and quantity
           bestFace = Math.floor(Math.random() * 5) + 2;
           const bidQty = Math.max(1, Math.floor(Math.random() * (totalDice * 0.3)) + 1);
-          await this.placeBid(bidQty, bestFace, botId);
+          await this.botPlaceBid(bidQty, bestFace, botId);
         } else {
-          // Medium & Hard logic for starting
           for (let i = 2; i <= 6; i++) {
             if (faceCounts[i] + faceCounts[1] > maxCount) {
               maxCount = faceCounts[i] + faceCounts[1];
@@ -509,20 +522,18 @@ export class Server {
           if (difficulty === 'Hard') {
             bidQty = Math.min(30, Math.max(1, maxCount + Math.floor((totalDice - botState.diceCount) / 3)));
           }
-          await this.placeBid(bidQty, bestFace, botId);
+          await this.botPlaceBid(bidQty, bestFace, botId);
         }
       } else {
         if (difficulty === 'Easy') {
           if (Math.random() > 0.4) {
-             // 60% chance to randomly increase bid
              if (Math.random() > 0.5 && currentBid.face < 6) {
-               await this.placeBid(Math.min(30, currentBid.quantity), currentBid.face + 1, botId);
+               await this.botPlaceBid(Math.min(30, currentBid.quantity), currentBid.face + 1, botId);
              } else {
-               await this.placeBid(Math.min(30, currentBid.quantity + 1), currentBid.face === 6 ? 2 : currentBid.face, botId);
+               await this.botPlaceBid(Math.min(30, currentBid.quantity + 1), currentBid.face === 6 ? 2 : currentBid.face, botId);
              }
           } else {
-             // 40% chance to call liar
-             await this.callLiar(botId);
+             await this.botCallLiar(botId);
           }
           return;
         }
@@ -539,23 +550,107 @@ export class Server {
         const tolerance = difficulty === 'Hard' ? 1.0 : 1.5;
 
         if (currentBid.quantity > myExpectedTotal + tolerance || currentBid.quantity >= 30) {
-          await this.callLiar(botId);
+          await this.botCallLiar(botId);
         } else {
-          // Medium and Hard increasing logic
           if (Math.random() > 0.5 && currentBid.face < 6) {
-            await this.placeBid(Math.min(30, currentBid.quantity), currentBid.face + 1, botId);
+            await this.botPlaceBid(Math.min(30, currentBid.quantity), currentBid.face + 1, botId);
           } else {
-            await this.placeBid(Math.min(30, currentBid.quantity + 1), currentBid.face === 6 ? 2 : currentBid.face, botId);
+            await this.botPlaceBid(Math.min(30, currentBid.quantity + 1), currentBid.face === 6 ? 2 : currentBid.face, botId);
           }
         }
       }
     } catch (e) {
       console.error("Bot turn error", e);
       if (state.currentBid) {
-        await this.callLiar(botId).catch(() => {});
+        await this.botCallLiar(botId).catch(() => {});
       } else {
-        await this.placeBid(1, 2, botId).catch(() => {});
+        await this.botPlaceBid(1, 2, botId).catch(() => {});
       }
     }
+  }
+
+  private async botPlaceBid(quantity: number, face: number, botId: string): Promise<void> {
+    const state = await $room.getRoomState();
+    if (state.status !== 'PLAYING') throw new Error("Not playing");
+    if (state.currentTurn !== botId) throw new Error("Not this bot's turn");
+    const botState = await $room.getUserState(botId);
+    if (!botState?.isBot) throw new Error("Not a bot");
+
+    if (!Number.isInteger(face) || face < 1 || face > 6) throw new Error("Face must be between 1 and 6");
+    if (!Number.isInteger(quantity) || quantity < 1) throw new Error("Quantity must be at least 1");
+    if (quantity > 30) throw new Error("Quantity cannot exceed 30");
+
+    const currentBid = state.currentBid;
+    if (currentBid) {
+      if (quantity < currentBid.quantity) throw new Error("Quantity must be at least current bid quantity");
+      if (quantity === currentBid.quantity && face <= currentBid.face) throw new Error("If quantity is same, face must be higher");
+    }
+
+    await this.addLog(`${botState.name} bids ${quantity} of ${face}s`);
+
+    const active = state.activePlayers;
+    const idx = active.indexOf(botId);
+    const nextPlayer = active[(idx + 1) % active.length];
+
+    await $room.updateRoomState({
+      currentBid: { account: botId, quantity, face },
+      currentTurn: nextPlayer,
+      turnStartTime: Date.now()
+    });
+  }
+
+  private async botCallLiar(botId: string): Promise<void> {
+    const state = await $room.getRoomState();
+    if (state.status !== 'PLAYING') throw new Error("Not playing");
+    if (state.currentTurn !== botId) throw new Error("Not this bot's turn");
+    const botState = await $room.getUserState(botId);
+    if (!botState?.isBot) throw new Error("Not a bot");
+
+    const currentBid = state.currentBid;
+    if (!currentBid) throw new Error("No bid to call liar on");
+
+    const bidderState = await $room.getUserState(currentBid.account);
+    await this.addLog(`${botState.name} calls LIAR on ${bidderState.name}!`);
+
+    let totalCount = 0;
+    const allDice: Record<string, number[]> = {};
+    for (const p of state.activePlayers) {
+      const uState = await $room.getUserState(p);
+      allDice[p] = uState.dice;
+      for (const d of uState.dice) {
+        if (d === currentBid.face || (d === 1 && currentBid.face !== 1)) totalCount++;
+      }
+    }
+
+    await this.addLog(`There are ${totalCount} matching dice.`);
+
+    let loser = '';
+    if (totalCount >= currentBid.quantity) {
+      await this.addLog(`Bid was SUCCESSFUL! ${botState.name} loses a die.`);
+      loser = botId;
+    } else {
+      await this.addLog(`Bid was a LIE! ${bidderState.name} loses a die.`);
+      loser = currentBid.account;
+    }
+
+    const loserState = await $room.getUserState(loser);
+    const newDiceCount = loserState.diceCount - 1;
+    await $room.updateUserState(loser, { diceCount: newDiceCount });
+
+    let nextActive = [...state.activePlayers];
+    if (newDiceCount <= 0) {
+      await this.addLog(`${loserState.name} is ELIMINATED!`);
+      nextActive = nextActive.filter(p => p !== loser);
+    }
+
+    await $room.updateRoomState({
+      status: 'ROUND_OVER',
+      activePlayers: nextActive,
+      lastLoser: loser,
+      revealedDice: allDice,
+      roundOverTime: Date.now()
+    });
+
+    await this.checkWinCondition(nextActive, state.teamsEnabled);
   }
 }
