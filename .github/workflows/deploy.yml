@@ -36,7 +36,7 @@ jobs:
       - name: Build Project
         env:
           VITE_AGENT8_ACCOUNT: ${{ vars.VITE_AGENT8_ACCOUNT }}
-          VITE_AGENT8_VERSE: ${{ vars.VITE_AGENT8_VERSE || 'Mendadice' }}
+          VITE_AGENT8_VERSE: ${{ vars.VITE_AGENT8_VERSE || 'W3u3h5L' }}
         run: npm run build
 
       - name: Upload Build Artifacts
