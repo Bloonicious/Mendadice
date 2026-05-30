@@ -23,8 +23,12 @@ const helpPages = [
   }
 ];
 
+const gameServerConfig = import.meta.env.PROD
+  ? { verse: import.meta.env.VITE_AGENT8_VERSE || "Mendadice" }
+  : undefined;
+
 export default function App() {
-  const { connected, server } = useGameServer();
+  const { connected, server } = useGameServer(gameServerConfig);
   const roomState = useRoomState() || {};
   const myState = useRoomMyState();
   const allUsers = useRoomAllUserStates() || [];
