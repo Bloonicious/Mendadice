@@ -48,14 +48,16 @@
 
           const width = Math.max(document.body.scrollWidth, document.documentElement.scrollWidth);
 
-          window.parent.postMessage(
-            {
-              type: 'GAME_SIZE_RESPONSE',
-              height: height,
-              width: width,
-            },
-            '*',
-          );
+          if (window.parent !== window) {
+            window.parent.postMessage(
+              {
+                type: 'GAME_SIZE_RESPONSE',
+                height: height,
+                width: width,
+              },
+              document.referrer || window.location.origin,
+            );
+          }
         }
 
         window.addEventListener('load', reportGameSize);
@@ -63,6 +65,7 @@
         window.addEventListener('resize', reportGameSize);
 
         window.addEventListener('message', function (event) {
+          if (document.referrer && !event.origin) return;
           if (event.data && event.data.type === 'REQUEST_GAME_SIZE') {
             reportGameSize();
           }
