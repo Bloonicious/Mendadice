@@ -24,10 +24,21 @@ const helpPages = [
 ];
 
 const connectionRetryDelayMs = 15000;
+const defaultAgent8Verse = "W3u3h5L";
+const walletAddressPattern = /^0x[a-fA-F0-9]{40}$/;
+
+const getConfiguredVerse = () => {
+  const configuredVerse = import.meta.env.VITE_AGENT8_VERSE;
+  if (!configuredVerse || walletAddressPattern.test(configuredVerse)) {
+    return defaultAgent8Verse;
+  }
+
+  return configuredVerse;
+};
 
 const gameServerConfig = import.meta.env.PROD
   ? {
-      verse: import.meta.env.VITE_AGENT8_VERSE || "Mendadice",
+      verse: getConfiguredVerse(),
       ...(import.meta.env.VITE_AGENT8_ACCOUNT ? { account: import.meta.env.VITE_AGENT8_ACCOUNT } : {})
     }
   : undefined;
