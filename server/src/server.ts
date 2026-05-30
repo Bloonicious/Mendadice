@@ -111,14 +111,6 @@ export class Server {
     await this.addLog(`Team mode ${!state.teamsEnabled ? 'enabled' : 'disabled'}.`);
   }
 
-  async togglePrivacy() {
-    const state = await $room.getRoomState();
-    if (state.status !== 'LOBBY') throw new Error("Can only toggle privacy in lobby");
-    if (state.players?.[0] !== $sender.account) throw new Error("Only room owner can toggle privacy");
-    await $room.updateRoomState({ isPrivate: !state.isPrivate });
-    await this.addLog(`Room is now ${!state.isPrivate ? 'PRIVATE' : 'PUBLIC'}.`);
-  }
-
   async joinRandomPublicLobby(): Promise<string> {
     const roomStates = await $global.getAllRoomStates();
     let targetRoomId = undefined;
@@ -137,14 +129,6 @@ export class Server {
       await this.purgePlayer($sender.account, state);
     }
     await $global.leaveRoom();
-  }
-
-  async toggleTeams() {
-    const state = await $room.getRoomState();
-    if (state.status !== 'LOBBY') throw new Error("Can only toggle teams in lobby");
-    if (state.players?.[0] !== $sender.account) throw new Error("Only room owner can toggle teams");
-    await $room.updateRoomState({ teamsEnabled: !state.teamsEnabled });
-    await this.addLog(`Team mode ${!state.teamsEnabled ? 'enabled' : 'disabled'}.`);
   }
 
   async addBot(difficulty: string = 'Medium'): Promise<void> {
